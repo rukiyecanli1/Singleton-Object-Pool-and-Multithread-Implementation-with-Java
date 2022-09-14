@@ -1,0 +1,24 @@
+@startuml
+class MultithreadObjectPool.Connection {
++ <<Create>> Connection()
+}
+class MultithreadObjectPool.ConnectionPool {
+- ArrayList<Connection> _available
+- ınt MAXTotalObjects
+- boolean isFull
+- {static} Lock lock
+- {static} ConnectionPool instance
+- <<Create>> ConnectionPool()
++ {static} ConnectionPool GetPoolInstance()
++ void setPool()
++ Connection acquireObject()
++ void releaseObject(Connection)
+}
+class MultithreadObjectPool.Client {
++ void run()
++ {static} void main(String[])
+}
+
+
+MultithreadObjectPool.Thread <|-- MultithreadObjectPool.Client
+@enduml

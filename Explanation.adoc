@@ -1,0 +1,105 @@
+
+= YAZILIM TASARIM KALIPLARI
+
+= Singleton-Object Pool ve Multithread Uygulaması
+
+CoonectionPool'dan constructor aracılığıyla birden fazla nesne örneklenmesini önlemek için constructor'ı private olarak ayarladım. 
+
+[source,]
+----
+public class ConnectionPool {
+
+    private ConnectionPool() {   
+    }
+----
+
+Nesnenin getPoolInstance fonksiyonuyla tek bir defa örneklenebilmesi için ilk adımda nesneye "null" atadım.  Volatile ile derleyici optimizasyonu engellenmiş olur. Nesne önbellekten değil de ram'den okunur.
+
+[source,]
+----
+private static volatile ConnectionPool instance = null;
+----
+
+Proje multithread olarak gerçekleştirileceği için birden fazla thread'in aynı anda birden fazla havuz oluşturabilmesi bir problemdir. Bu fonksiyonu sadece bir havuz nesnesinin örneklenebilmesi için yazdım. Ana sınıftan bulunduğu sınıf aracılığıyla çağrılabilmesi için fonksiyonu static olarak ayarladım. Thread'ler aynı anda çalışmaya başlayıp fonksiyonu aynı anda çağıracakları için lock-unlock yapısı kullandım. Buraya gelen ilk thread try bloğuna girerken diğerleri lock nesnesinin unlock olmasını yani bloğa giren thread'in bloktan çıkmasını bekler. İlk thread instance'ı "null" olarak göreceğinden if bloğuna girer ve bir havuz nesnesi oluşturup bu nesneyi ana sınıfa döndürür. Diğer thread'ler instance nesnesini "null" göremeyeceği için yeni bir nesne havuzu örneklenemez böylece object pool-singleton yapısı uygulanmış olur. 
+
+[source,]
+----
+ public static ConnectionPool GetPoolInstance() {
+        lock.lock(); // thread'ler eş zamanlı olarak çalışamayacak
+        try {
+            if (instance == null) {
+                instance = new ConnectionPool();
+            }
+        }  finally {
+            lock.unlock();
+        }
+
+        return instance;
+    }
+----
+
+Bu fonksiyonun çağrılmasıyla havuzun içinin doldurulması sağlanır. 10 adet nesne örneklenir ve _available arrayList'ine atanır. Bu metoda birden fazla thread aynı anda ulaşabileceği için metodu synchronized olarak ayarladım. Böylece gövdeye aynı anda tek bir thread girebilir. Bloğa giren thread havuz daha önce oluşturulmamışsa nesneleri örnekler ve list'e atar. Daha sonra havuzun dolu olduğunu haber verir. Bu sayede diğer thread'ler bir daha havuzu dolduramaz.
+
+[source,]
+----
+public synchronized void setPool(){
+
+        if( !isFull )
+        for(int i = 1; i <= 10 ; i++){
+            System.out.print(i+".");
+            Connection obj = new Connection();
+            _available.add(obj);
+        }
+        isFull = true;
+    }
+----
+
+Havuz içerisine nesneler örneklendikten sonra nesne kullanım fonksiyonu çağrılır. Bu fonksiyona gelen thread'leri de senkronize çalışacak şekilde ayarladım çünkü havuzdan aynı nesneye erişmeye çalışmaları hata döndürecekti. Fonksiyonun ilk satırında havuzda nesne olup olmadığı kontrol edilir. Eğer varsa ilk nesne alınıp "obj" nesnesine atanır, nesne listeden kaldırılır ve o anki thread bu nesneyle işlem yapmaya başlar (öğrenci ders seçimi yapmaya başlar). Eğer liste boşsa o an çalışan thread (o an ders seçimi yapmak isteyen öğrenci) wait() fonksiyonuyla bekletilir. İşini bitiren thread'lerin nesneleri geri bırakmasıyla liste tekrar dolar ve beklemedeki thread'lere releaseObject() fonksiyonu içindeki notifyAll() fonksiyonuyla havuzda nesne olduğu bildirilir ve sonunda bu thread'ler de işlemini gerçekleştirmiş olur.
+
+[source,]
+----
+public synchronized Connection acquireObject() throws InterruptedException {
+
+            if (_available.isEmpty()) {
+              //  System.out.println("havuz boş, bağlantı nesnelerinin bırakılması bekleniyor...");
+                try {
+                    System.out.println("havuzdaki nesne sayısı: "+_available.size());
+                    System.out.println("("+Thread.currentThread().getName() +")"+
+                            " öğrenci başka bir öğrencinin çıkmasını bekliyor...");
+                    wait();
+                    System.out.println("havuzdaki nesne sayısı: "+_available.size());
+                   // System.out.println(Thread.currentThread().getName() + " devam ediyor...");
+
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            Connection obj = _available.get(0);
+            _available.remove(obj);
+
+            System.out.println("("+Thread.currentThread().getName()+")"+
+                    " öğrenci ders seçimi yapıyor... ");
+            Thread.sleep(4000);
+            return obj;
+
+        }
+----
+
+Nesneyi alıp kullanan thread bu fonksiyon ile kullandığı nesneyi havuza bırakır. Burada nesneler _available listesine eklenir. Eklendikten sonra notifyAll() fonksiyonuyla bekletilen thread'lere listede nesne olduğu bildirilir.
+
+[source,]
+----
+ public synchronized void  releaseObject(Connection obj) throws InterruptedException
+    {
+
+            System.out.println("("+Thread.currentThread().getName()+")"+/*" "  + obj +*/
+                    " öğrenci çıkış yapıyor... ");
+            Thread.sleep(1000);
+            _available.add(obj);
+             notifyAll();
+
+    }
+
+
+----
+
